@@ -2,6 +2,22 @@
 Output formatter for the Futoshiki Puzzle Solver.
 
 Formats solved grids with inequality symbols between adjacent cells.
+
+Output format (example 4×4):
+    2 < 3   4   1
+    v
+    1   2 > 3   4
+                ^
+    4   1   2   3
+    ^
+    3   4   1 < 2
+
+Rules:
+- Each cell value occupies 1 character.
+- Between horizontally adjacent cells: " < " or " > " (3 chars) if constraint, else "   " (3 spaces).
+- Vertical separator rows: only the symbol (^ or v) at the column position of the constraint,
+  rest is spaces. The symbol is aligned under the digit of the cell above.
+- Empty separator rows (no vertical constraints on that row boundary) are omitted.
 """
 
 import os
@@ -10,66 +26,84 @@ from typing import Dict, Tuple
 from models import Puzzle
 
 
+def _col_positions(puzzle: Puzzle) -> list:
+    """
+    Compute the character position of each column's digit in a formatted row.
+    
+    Row format: "d1 X d2 X d3 X d4" where X is '<', '>' or ' '
+    Each cell digit is at position: j * 4  (0, 4, 8, 12, ...)
+    Between cells: positions j*4+1, j*4+2, j*4+3 hold " X " or "   "
+    """
+    return [j * 4 for j in range(puzzle.n)]
+
+
 def _format_row(puzzle: Puzzle, assignment: Dict[Tuple[int, int], int], row: int) -> str:
-    """Format a single row with horizontal constraint symbols."""
+    """
+    Format a single data row.
+    
+    Example: "2 < 3   4   1"
+    - Between col j and col j+1: " < " if LessH, " > " if GreaterH, "   " otherwise
+    """
     n = puzzle.n
-    parts = []
+    result = []
     for j in range(n):
-        parts.append(str(assignment[(row, j)]))
+        result.append(str(assignment[(row, j)]))
         if j < n - 1:
             c = puzzle.h_constraints[row][j]
             if c == 1:
-                parts.append("<")
+                result.append(" < ")
             elif c == -1:
-                parts.append(">")
+                result.append(" > ")
             else:
-                parts.append(" ")
-    return " ".join(parts)
+                result.append("   ")
+    return "".join(result)
 
 
 def _format_v_separator(puzzle: Puzzle, row: int) -> str:
     """
-    Format the vertical separator row between grid row `row` and row `row+1`.
-    Uses '^' when top < bottom (v_constraint == 1),
-         'v' when top > bottom (v_constraint == -1),
-         ' ' when no constraint.
-    Aligned under each cell column.
+    Format the vertical separator line between row `row` and row `row+1`.
+    
+    Only prints '^' or 'v' at the exact character position of the column digit.
+    All other positions are spaces.
+    Returns empty string if no vertical constraints on this boundary.
+    
+    Column digit positions: j * 4  (since each cell+separator = 4 chars: "d   " or "d < ")
     """
     n = puzzle.n
-    # Each cell value takes 1 char; separators between cells take 1 char each.
-    # Total width per cell position = 1 (value) + 1 (space) + 1 (h-sep) + 1 (space) = 4
-    # But we just need to align under the value character.
-    # Row format: "v1 < v2   v3 > v4" — each value at positions 0, 4, 8, 12 (step 4 for N=4)
-    # Actually the row is built as " ".join(parts) where parts alternate value/h-sep.
-    # For N cells: positions of values in the joined string:
-    #   j=0 → index 0, j=1 → index 2 (after "v1 X "), etc.
-    # Let's just build the separator aligned to match _format_row output.
-
-    parts = []
+    col_pos = _col_positions(puzzle)
+    
+    # Total row width = last col position + 1
+    total_width = col_pos[-1] + 1
+    chars = [' '] * total_width
+    
+    has_any = False
     for j in range(n):
         c = puzzle.v_constraints[row][j]
         if c == 1:
-            parts.append("^")
+            chars[col_pos[j]] = '^'
+            has_any = True
         elif c == -1:
-            parts.append("v")
-        else:
-            parts.append(" ")
-        if j < n - 1:
-            parts.append(" ")  # spacer under h-sep position
-    return " ".join(parts)
+            chars[col_pos[j]] = 'v'
+            has_any = True
+    
+    if not has_any:
+        return ""
+    
+    # Strip trailing spaces
+    return "".join(chars).rstrip()
 
 
 def format_solution(puzzle: Puzzle, assignment: Dict[Tuple[int, int], int]) -> str:
     """
     Format the complete solution grid with inequality symbols.
-
+    
     Example output (4×4):
         2 < 3   4   1
-        v           ^
+        v
         1   2 > 3   4
-                ^
+                    ^
         4   1   2   3
-            ^
+        ^
         3   4   1 < 2
     """
     n = puzzle.n
@@ -77,13 +111,17 @@ def format_solution(puzzle: Puzzle, assignment: Dict[Tuple[int, int], int]) -> s
     for i in range(n):
         lines.append(_format_row(puzzle, assignment, i))
         if i < n - 1:
-            lines.append(_format_v_separator(puzzle, i))
+            sep = _format_v_separator(puzzle, i)
+            # Always add separator line (even if empty, to match PDF format)
+            lines.append(sep)
     return "\n".join(lines)
 
 
 def write_output(content: str, output_path: str) -> None:
     """Write formatted solution to file, creating directories as needed."""
-    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+    dir_name = os.path.dirname(output_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
         f.write("\n")
